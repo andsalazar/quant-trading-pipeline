@@ -273,6 +273,14 @@ export POLYGON_API_KEY="your_key_here"
 - **[Economic Research Paper](https://github.com/andsalazar)** — Companion academic
   project applying econometric methods to related market microstructure questions.
 
+## Disclaimer
+
+> **This project is for educational and portfolio demonstration purposes only — it is not financial advice.**
+> Signal thresholds, position sizing, and capital allocation shown in the code are
+> illustrative examples used for backtesting and development. They do not represent
+> optimized or recommended trading parameters. Past backtest performance does not
+> guarantee future results. Use at your own risk.
+
 ## License
 
 MIT — See [LICENSE](LICENSE) for details.

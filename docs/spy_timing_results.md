@@ -176,6 +176,7 @@ The model is well-calibrated: higher predicted probabilities correspond to highe
 4. **Regime dependence**: Model struggles in slow-grind rallies (2023, 2024) where staying long beats timing
 5. **Walk-forward ≠ live**: Past walk-forward performance is the best offline estimate but real-world execution may differ
 6. **Small sample**: ~1,250 trading days in test set — confidence intervals are wide
+7. **Example parameters**: Signal thresholds and position sizing in the code are illustrative examples for testing, not optimized production parameters
 
 ---
 
