@@ -292,6 +292,18 @@ else:
     print(f"  ⚠ Script not found: {spy_predictor}")
     results.append({'step': 'STEP 10b', 'status': 'NOT_FOUND', 'elapsed': 0})
 
+# Step 10c: Reconcile model predictions × trader actions × IBKR fills
+# Joins prediction_log, trade_log, and (optionally) IBKR reqExecutions() to
+# compute slippage_bps, alpha_capture_pct, and execution_ok per trade. Always
+# exits 0 — alerts are surfaced via stdout / CSV / email, not exit codes.
+spy_reconciler = os.path.join(BASE_PATH, r'#_model_training\06_04_reconcile_executions.py')
+if os.path.exists(spy_reconciler):
+    run_script('STEP 10c', spy_reconciler, 'SPY timing — execution reconciliation (slippage, alpha capture)')
+else:
+    print(f"\n[STEP 10c] SPY Execution Reconciler")
+    print(f"  ⚠ Script not found: {spy_reconciler}")
+    results.append({'step': 'STEP 10c', 'status': 'NOT_FOUND', 'elapsed': 0})
+
 # ============================================================================
 # SUMMARY
 # ============================================================================

@@ -19,16 +19,17 @@ Built as a solo project over 6+ months, this pipeline fetches multi-asset data f
 │                    DAILY PIPELINE (Automated)                   │
 │                                                                 │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │  Step 1-7 │→│  Step 8   │→│  Step 9   │→│  Step 10      │  │
-│  │  Fetch    │  │  Database │  │  Feature  │  │  SPY Timing   │  │
-│  │  7 Sources│  │  Update   │  │  Engineer │  │  Signal       │  │
+│  │  Step 1-7 │→│  Step 8   │→│  Step 9   │→│  Step 10a/b/c │  │
+│  │  Fetch    │  │  Database │  │  Feature  │  │  Track →      │  │
+│  │  7 Sources│  │  Update   │  │  Engineer │  │  Predict →    │  │
+│  │           │  │           │  │           │  │  Reconcile    │  │
 │  └──────────┘  └──────────┘  └──────────┘  └───────────────┘  │
 │       │                           │               │             │
 │  Market Data              400+ Features       BUY / CASH        │
 │  Currencies               Regime Detection    Next-Day Signal   │
-│  Treasuries               Cross-Asset Flows                     │
-│  Futures                  Momentum Quality                      │
-│  Options                  Sentiment Divergence                  │
+│  Treasuries               Cross-Asset Flows   + Slippage /      │
+│  Futures                  Momentum Quality      Alpha-Capture   │
+│  Options                  Sentiment Divergence  Reconciliation  │
 │  Macro Events             Technical Indicators                  │
 │  News Sentiment           Interaction Features                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -120,6 +121,8 @@ quant-trading-pipeline/
 │   │   │   ├── train.py         #   LGB + XGB ensemble, walk-forward backtest
 │   │   │   ├── predict.py       #   Daily BUY/CASH signal generation
 │   │   │   ├── track.py         #   Live accuracy tracking + degradation alerts
+│   │   │   ├── promote.py       #   Atomic model swap + isotonic recalibration
+│   │   │   │                    #   (AUC guardrail aborts on >3pt regression)
 │   │   │   └── optimize.py      #   Optuna hyperparameter optimization
 │   │   │
 │   │   ├── stock_ensemble/      # 10-day stock-picking ensemble
@@ -134,7 +137,9 @@ quant-trading-pipeline/
 │   │
 │   ├── trade_execution/         # IBKR TWS API integration
 │   │   ├── ibkr_trader.py       #   Confidence-weighted position sizing
-│   │   └── spy_timing_trader.py #   SPY fractional shares + email alerts
+│   │   ├── spy_timing_trader.py #   SPY fractional shares + email alerts
+│   │   └── reconcile_executions.py  # Three-way join: prediction × trade × fill
+│   │                            #   (slippage_bps, alpha_capture_pct, alerts)
 │   │
 │   ├── pipeline_orchestration/  # Daily automation + Task Scheduler
 │   │
@@ -148,6 +153,7 @@ quant-trading-pipeline/
 │   ├── architecture.md          # Detailed system design
 │   ├── feature_taxonomy.md      # All 400+ features documented
 │   ├── spy_timing_results.md    # Full backtest results + equity curves
+│   ├── execution_reconciliation.md  # Step 10c: model × trader × broker join
 │   └── dl_experiments.md        # Double-descent findings
 │
 ├── config_sample.py             # Configuration template (no secrets)
@@ -226,6 +232,30 @@ Optuna TPE sampler with walk-forward as the objective (not simple train/test):
 5. **Deep Learning Research** — 112.5 GPU hours systematically testing whether neural
    architectures could beat tree models on this data. They couldn't — and that result
    is documented rather than hidden.
+
+6. **Production Discipline** — The model is not the system. The system includes the
+   monitoring and safety machinery that lets a live trading pipeline survive contact
+   with the market (see next section).
+
+## Production Discipline
+
+A live trading system fails in ways a backtest never sees. This pipeline includes
+the operational scaffolding that turns a one-shot model into an asset that survives
+months of unattended running:
+
+| Discipline                  | Where                                       | What it catches                                              |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------------ |
+| **Daily accuracy tracking** | `spy_timing/track.py` (Step 10a)            | Live AUC / hit-rate drift vs OOS backtest                    |
+| **Daily reconciliation**    | `trade_execution/reconcile_executions.py` (Step 10c) | Execution failures, slippage drift, alpha-capture decay |
+| **AUC promotion guardrail** | `spy_timing/promote.py`                     | Aborts model swap if new eval AUC drops >3pts vs last promote |
+| **Atomic model swap**       | `spy_timing/promote.py`                     | Backs up production .pkl + calibration before overwrite      |
+| **Isotonic recalibration**  | `spy_timing/promote.py`                     | Re-fits probability calibration on each promotion            |
+| **Threshold re-tuning**     | `spy_timing/promote.py`                     | Sweeps 0.40–0.70, picks calib-Sharpe optimum                 |
+| **Email alerts**            | trader + reconciler                         | Same-day notification on execution failure / slippage / capture drop |
+| **Pipeline soft-fail**      | `pipeline_orchestration/daily_pipeline.py`  | Reconciler exits 0 even on alerts — never blocks tomorrow's signal |
+
+See [`docs/execution_reconciliation.md`](docs/execution_reconciliation.md) for the
+three-way reconciliation methodology (model says × trader does × broker fills).
 
 ## Tech Stack
 
