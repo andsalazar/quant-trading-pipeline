@@ -46,6 +46,14 @@ DATABASE_*_LOG.*
 *.key
 secrets/
 
+# Service-account / credential keys (cloud execution)
+gcs-sa.json
+*-sa.json
+*service-account*.json
+*credentials*.json
+deploy/secrets/
+deploy/.env
+
 # ============================================================================
 # Python
 # ============================================================================

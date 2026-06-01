@@ -2,13 +2,15 @@
 
 **End-to-end machine learning system for equity market prediction and automated execution.**
 
-Built as a solo project over 6+ months, this pipeline fetches multi-asset data from 7 sources, engineers 400+ features, trains gradient-boosted ensembles with walk-forward validation, and generates daily trading signals — all automated via Windows Task Scheduler.
+Built as a solo project over 6+ months, this pipeline fetches multi-asset data from 7 sources, engineers 400+ features, trains gradient-boosted ensembles with walk-forward validation, and generates daily trading signals — with execution running on a headless, containerized cloud stack (GCP VM + IB Gateway) decoupled from the local signal-generation machine.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![XGBoost](https://img.shields.io/badge/XGBoost-GPU-orange)](https://xgboost.readthedocs.io/)
 [![LightGBM](https://img.shields.io/badge/LightGBM-4.x-green)](https://lightgbm.readthedocs.io/)
 [![Optuna](https://img.shields.io/badge/Optuna-4.5-blue)](https://optuna.org/)
 [![IBKR](https://img.shields.io/badge/IBKR-TWS%20API-red)](https://interactivebrokers.com/)
+[![GCP](https://img.shields.io/badge/Google%20Cloud-Compute%20%2B%20Storage-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
 ---
 
@@ -149,6 +151,14 @@ quant-trading-pipeline/
 │       ├── analyze_results.py   #   Cross-architecture comparison
 │       └── runners/             #   Experiment launchers (overnight, sweep)
 │
+├── deploy/                      # Headless cloud execution stack (GCP)
+│   ├── docker-compose.yml       #   IB Gateway + IBC + executor services
+│   ├── Dockerfile               #   Containerized cron executor (Python 3.11)
+│   ├── entrypoint.sh            #   In-container cron daemon bootstrap
+│   ├── crontab                  #   Market-open trigger (09:31 America/New_York)
+│   ├── gcs_pull.py              #   VM-side signal download from GCS
+│   └── README.md                #   Full VM + bucket + service-account setup guide
+│
 ├── docs/
 │   ├── architecture.md          # Detailed system design
 │   ├── feature_taxonomy.md      # All 400+ features documented
@@ -237,6 +247,11 @@ Optuna TPE sampler with walk-forward as the objective (not simple train/test):
    monitoring and safety machinery that lets a live trading pipeline survive contact
    with the market (see next section).
 
+7. **Cloud & DevOps** — Execution runs as a headless, containerized stack on a GCP
+   VM (Docker Compose, IB Gateway + IBC auto-login, cron, Cloud Storage hand-off,
+   least-privilege service-account IAM) — decoupled from signal generation so the
+   trade fires at market open whether or not the workstation is awake.
+
 ## Production Discipline
 
 A live trading system fails in ways a backtest never sees. This pipeline includes
@@ -257,6 +272,51 @@ months of unattended running:
 See [`docs/execution_reconciliation.md`](docs/execution_reconciliation.md) for the
 three-way reconciliation methodology (model says × trader does × broker fills).
 
+## Cloud Execution Infrastructure
+
+Signal *generation* runs on a local GPU workstation; trade *execution* runs in the
+cloud. The two are deliberately decoupled so a laptop being asleep, offline, or
+mid-reboot can never miss a market-open trade.
+
+**The problem it solves.** Running the broker API against a desktop trading
+terminal is fragile: the terminal restarts on its own daily schedule, the API
+socket silently disables itself, and the whole thing depends on one machine
+staying awake. The fix was to move execution onto an always-on, headless,
+containerized stack with no GUI in the loop.
+
+```
+  LOCAL WORKSTATION (GPU)                 GOOGLE CLOUD PLATFORM
+  ┌────────────────────────┐              ┌──────────────────────────────────┐
+  │ Daily pipeline (5:30pm) │              │  Compute Engine VM (always-on)   │
+  │  → trains / predicts    │   signal     │  ┌────────────────────────────┐  │
+  │  → BUY / CASH signal     │  ──CSV──►    │  │ Docker Compose             │  │
+  │  → uploads to GCS        │   (GCS)      │  │  ┌──────────┐ ┌──────────┐ │  │
+  └────────────────────────┘   bucket      │  │  │ IB Gateway│ │ Executor │ │  │
+                                            │  │  │ + IBC     │◄│  (cron)  │ │  │
+  ┌────────────────────────┐               │  │  │ (headless)│ │ pulls    │ │  │
+  │ Cloud Storage bucket    │  ◄──pull──    │  │  └────┬─────┘ │ signal,  │ │  │
+  │  versioned signal hand- │   09:31 ET    │  │   socat relay │ trades   │ │  │
+  │  off, least-priv access │               │  │       └───────┴──────────┘ │  │
+  └────────────────────────┘               │  └────────────────────────────┘  │
+                                            │   restart:always · auto-relogin  │
+                                            └──────────────────────────────────┘
+```
+
+| Concern | Approach |
+|---------|----------|
+| **Always-on execution** | GCP Compute Engine VM (Debian 12) — no dependence on the laptop being awake |
+| **Headless broker login** | IB Gateway + IBC auto-login in a container — no GUI, no manual click-through on restart |
+| **Service isolation** | Docker Compose: gateway and executor in separate containers, internal-only API ports (never published to the host) |
+| **Self-healing** | `restart: always` + container healthchecks + IBC re-authentication on the broker's daily restart |
+| **Scheduled trigger** | In-container `cron` fires at market open in `America/New_York`, timezone-correct year-round |
+| **Decoupled hand-off** | Google Cloud Storage as the signal bus — generation and execution share nothing but a versioned CSV |
+| **Least-privilege auth** | Dedicated service account scoped to a single bucket; key mounted as a secret, never committed |
+| **Staleness guard** | Executor refuses signals older than N business days (weekend-aware) so a missed run can't fire a stale trade |
+
+See [`deploy/README.md`](deploy/README.md) for the full provisioning guide
+(VM, bucket, service account, container build). No credentials are stored in the
+repository — all secrets live in untracked environment files on the VM.
+
 ## Tech Stack
 
 | Layer | Tools |
@@ -266,8 +326,9 @@ three-way reconciliation methodology (model says × trader does × broker fills)
 | **ML** | XGBoost (GPU), LightGBM, CatBoost, scikit-learn |
 | **DL** | PyTorch + CUDA |
 | **Optimization** | Optuna (TPE sampler) |
-| **Execution** | Interactive Brokers TWS API (ib_insync) |
-| **Automation** | Windows Task Scheduler, batch scripts |
+| **Execution** | Interactive Brokers Gateway API (ib_insync), IBC headless auto-login |
+| **Cloud / DevOps** | Google Cloud Platform (Compute Engine, Cloud Storage), Docker, Docker Compose, Linux (Debian), cron, service-account IAM |
+| **Automation** | Windows Task Scheduler (signal gen), in-container cron (execution), batch scripts |
 | **Sentiment** | OpenAI GPT-3.5 via API |
 
 ## Setup
