@@ -153,9 +153,8 @@ quant-trading-pipeline/
 │
 ├── deploy/                      # Headless cloud execution stack (GCP)
 │   ├── docker-compose.yml       #   IB Gateway + IBC + executor services
-│   ├── Dockerfile               #   Containerized cron executor (Python 3.11)
-│   ├── entrypoint.sh            #   In-container cron daemon bootstrap
-│   ├── crontab                  #   Market-open trigger (09:31 America/New_York)
+│   ├── Dockerfile               #   Containerized executor (Python 3.11)
+│   ├── entrypoint.sh            #   In-container scheduler loop (09:31 America/New_York)
 │   ├── gcs_pull.py              #   VM-side signal download from GCS
 │   └── README.md                #   Full VM + bucket + service-account setup guide
 │
@@ -248,7 +247,7 @@ Optuna TPE sampler with walk-forward as the objective (not simple train/test):
    with the market (see next section).
 
 7. **Cloud & DevOps** — Execution runs as a headless, containerized stack on a GCP
-   VM (Docker Compose, IB Gateway + IBC auto-login, cron, Cloud Storage hand-off,
+   VM (Docker Compose, IB Gateway + IBC auto-login, a scheduler loop, Cloud Storage hand-off,
    least-privilege service-account IAM) — decoupled from signal generation so the
    trade fires at market open whether or not the workstation is awake.
 
@@ -292,7 +291,7 @@ containerized stack with no GUI in the loop.
   │  → BUY / CASH signal     │  ──CSV──►    │  │ Docker Compose             │  │
   │  → uploads to GCS        │   (GCS)      │  │  ┌──────────┐ ┌──────────┐ │  │
   └────────────────────────┘   bucket      │  │  │ IB Gateway│ │ Executor │ │  │
-                                            │  │  │ + IBC     │◄│  (cron)  │ │  │
+                                            │  │  │ + IBC     │◄│  (loop)  │ │  │
   ┌────────────────────────┐               │  │  │ (headless)│ │ pulls    │ │  │
   │ Cloud Storage bucket    │  ◄──pull──    │  │  └────┬─────┘ │ signal,  │ │  │
   │  versioned signal hand- │   09:31 ET    │  │   socat relay │ trades   │ │  │
@@ -308,7 +307,7 @@ containerized stack with no GUI in the loop.
 | **Headless broker login** | IB Gateway + IBC auto-login in a container — no GUI, no manual click-through on restart |
 | **Service isolation** | Docker Compose: gateway and executor in separate containers, internal-only API ports (never published to the host) |
 | **Self-healing** | `restart: always` + container healthchecks + IBC re-authentication on the broker's daily restart |
-| **Scheduled trigger** | In-container `cron` fires at market open in `America/New_York`, timezone-correct year-round |
+| **Scheduled trigger** | A self-contained scheduler loop in the executor fires at market open in `America/New_York`, timezone-correct year-round |
 | **Decoupled hand-off** | Google Cloud Storage as the signal bus — generation and execution share nothing but a versioned CSV |
 | **Least-privilege auth** | Dedicated service account scoped to a single bucket; key mounted as a secret, never committed |
 | **Staleness guard** | Executor refuses signals older than N business days (weekend-aware) so a missed run can't fire a stale trade |
@@ -327,8 +326,8 @@ repository — all secrets live in untracked environment files on the VM.
 | **DL** | PyTorch + CUDA |
 | **Optimization** | Optuna (TPE sampler) |
 | **Execution** | Interactive Brokers Gateway API (ib_insync), IBC headless auto-login |
-| **Cloud / DevOps** | Google Cloud Platform (Compute Engine, Cloud Storage), Docker, Docker Compose, Linux (Debian), cron, service-account IAM |
-| **Automation** | Windows Task Scheduler (signal gen), in-container cron (execution), batch scripts |
+| **Cloud / DevOps** | Google Cloud Platform (Compute Engine, Cloud Storage), Docker, Docker Compose, Linux (Debian), service-account IAM |
+| **Automation** | Windows Task Scheduler (signal gen), in-container scheduler loop (execution), batch scripts |
 | **Sentiment** | OpenAI GPT-3.5 via API |
 
 ## Setup

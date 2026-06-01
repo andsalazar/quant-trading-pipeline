@@ -19,7 +19,7 @@ Workstation (evening)                  GCS                     VM (always-on)
 |------|-----------|---------|
 | `docker-compose.yml` | VM | Defines `ib-gateway` (IBC) + `executor` services |
 | `Dockerfile` / `requirements.txt` | VM | Builds the lightweight executor (no ML stack) |
-| `entrypoint.sh` / `crontab` | VM | Keeps executor alive; fires trade at market open Mon–Fri |
+| `entrypoint.sh` | VM | Keeps executor alive; a self-contained scheduler loop fires the trade at market open Mon–Fri |
 | `pull_signal_and_trade.sh` | VM | Downloads signal from object storage, runs trader, unified logging |
 | `gcs_pull.py` | VM | Tiny object-storage download helper |
 | `gcs_push_signal.py` | Workstation | Uploads the signal after the evening pipeline |
@@ -93,7 +93,7 @@ unattended daily restarts, configure the broker's app-based ("IB Key") 2FA.
    ```bash
    python deploy/gcs_push_signal.py      # GCS_BUCKET set in the environment
    ```
-2. The VM's in-container cron pulls the signal at market open and trades
+2. The VM's in-container scheduler pulls the signal at market open and trades
    automatically. The workstation can be offline.
 
 ## Verify it works (paper first)
